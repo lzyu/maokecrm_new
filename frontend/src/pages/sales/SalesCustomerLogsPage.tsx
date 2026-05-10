@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from 'react'
-import { Button, DatePicker, Input, Modal, Pagination, Tag } from 'antd'
+import { Button, DatePicker, Input, Pagination, Tag } from 'antd'
 import dayjs from 'dayjs'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../api/client'
@@ -14,10 +14,6 @@ interface LogItem {
   summary: string | null
   created_at: string
   updated_at: string
-}
-
-interface LogDetailItem extends LogItem {
-  content: string | null
 }
 
 interface DetailItem {
@@ -45,8 +41,6 @@ export default function SalesCustomerLogsPage() {
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([null, null])
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(false)
-  const [detailOpen, setDetailOpen] = useState(false)
-  const [selectedLog, setSelectedLog] = useState<LogDetailItem | null>(null)
 
   const fetchLogs = async (nextPage = page) => {
     if (!customerId) return
@@ -154,11 +148,7 @@ export default function SalesCustomerLogsPage() {
               </div>
               <Button
                 size="small"
-                onClick={async () => {
-                  const detailRes = await api.get<LogDetailItem>(`/consultant/logs/${l.id}`)
-                  setSelectedLog(detailRes)
-                  setDetailOpen(true)
-                }}
+                onClick={() => navigate(`/sales/customers/${customerId}/logs/${l.id}`)}
               >
                 查看详情
               </Button>
@@ -178,32 +168,6 @@ export default function SalesCustomerLogsPage() {
           />
         </div>
       </div>
-
-      <Modal
-        title="咨询记录详情（只读）"
-        open={detailOpen}
-        footer={null}
-        onCancel={() => {
-          setDetailOpen(false)
-          setSelectedLog(null)
-        }}
-      >
-        {selectedLog ? (
-          <div style={{ display: 'grid', gap: 10 }}>
-            <div style={{ color: '#6b7280', fontSize: 12 }}>
-              {dayjs(selectedLog.log_date).format('YYYY-MM-DD')} · {selectedLog.duration} 分钟 · {selectedLog.consultant_name}
-            </div>
-            <div>
-              <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>摘要</div>
-              <div style={{ color: '#1f2937', lineHeight: 1.7 }}>{selectedLog.summary || '-'}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>内容</div>
-              <div style={{ color: '#4b5563', whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{selectedLog.content || '-'}</div>
-            </div>
-          </div>
-        ) : null}
-      </Modal>
     </div>
   )
 }

@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from 'react'
-import { Button, DatePicker, Form, Input, InputNumber, message, Modal, Popconfirm, Select, Table, Tag } from 'antd'
+import { Button, DatePicker, Form, Input, message, Modal, Popconfirm, Select, Table, Tag } from 'antd'
 import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
@@ -45,19 +45,6 @@ interface RowItem {
   row_tone: string
   collaborators: Badge[]
 }
-interface LogItem {
-  id: string
-  customer_id: string
-  consultant_id: string
-  consultant_name: string
-  is_me: boolean
-  log_date: string
-  duration: number
-  summary: string | null
-  content: string | null
-  created_at: string
-}
-
 const toneBg: Record<string, string> = {
   danger: '#fff3f3',
   info: '#eef3f9',
@@ -72,14 +59,9 @@ export default function ConsultantCustomersPage() {
   const [rows, setRows] = useState<RowItem[]>([])
   const [loading, setLoading] = useState(false)
   const [keyword, setKeyword] = useState('')
-  const [logTarget, setLogTarget] = useState<RowItem | null>(null)
-  const [logs, setLogs] = useState<LogItem[]>([])
-  const [logsLoading, setLogsLoading] = useState(false)
-  const [editingLog, setEditingLog] = useState<LogItem | null>(null)
   const [tagTarget, setTagTarget] = useState<RowItem | null>(null)
   const [tagOptions, setTagOptions] = useState<TagOption[]>([])
   const [selectedTag, setSelectedTag] = useState<string | null>(null)
-  const [logForm] = Form.useForm()
   const [editingNoteCustomerId, setEditingNoteCustomerId] = useState<string | null>(null)
   const [noteDraft, setNoteDraft] = useState('')
   const [savingNoteCustomerId, setSavingNoteCustomerId] = useState<string | null>(null)
@@ -98,15 +80,6 @@ export default function ConsultantCustomersPage() {
       setRows([])
     } finally {
       setLoading(false)
-    }
-  }
-
-  const fetchLogs = async (customerId: string) => {
-    setLogsLoading(true)
-    try {
-      setLogs(await api.get<LogItem[]>(`/consultant/customers/${customerId}/logs`))
-    } finally {
-      setLogsLoading(false)
     }
   }
 
@@ -138,24 +111,6 @@ export default function ConsultantCustomersPage() {
     } finally {
       setSavingNoteCustomerId(null)
     }
-  }
-
-  const submitLog = async () => {
-    if (!logTarget) return
-    const v = await logForm.validateFields()
-    const payload = {
-      log_date: dayjs(v.log_date).format('YYYY-MM-DD'),
-      duration: v.duration,
-      summary: v.summary ?? null,
-      content: v.content ?? null,
-    }
-    if (editingLog) await api.put(`/consultant/logs/${editingLog.id}`, payload)
-    else await api.post(`/consultant/customers/${logTarget.customer_id}/logs`, payload)
-    message.success('日志已保存')
-    setEditingLog(null)
-    logForm.resetFields()
-    fetchLogs(logTarget.customer_id)
-    fetchRows()
   }
 
   const returnToPool = async (customerId: string) => {
@@ -528,38 +483,6 @@ export default function ConsultantCustomersPage() {
         </Form>
       </Modal>
 
-      <Modal
-        title={logTarget ? `${logTarget.customer_name} · 咨询日志` : '咨询日志'}
-        open={!!logTarget}
-        onCancel={() => { setLogTarget(null); setEditingLog(null); logForm.resetFields() }}
-        footer={null}
-        width={860}
-      >
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16 }}>
-          <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 12, maxHeight: 420, overflow: 'auto' }}>
-            {logsLoading ? '加载中...' : logs.map(l => (
-              <div key={l.id} style={{ padding: '8px 0', borderBottom: '1px solid #f5f5f5' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <strong>{l.log_date} · {l.duration}分钟</strong>
-                  <span>{l.consultant_name}{l.is_me ? '（我）' : ''}</span>
-                </div>
-                <div style={{ color: '#595959', marginTop: 4 }}>{l.summary || '—'}</div>
-                {l.is_me && <Button size="small" style={{ marginTop: 6 }} onClick={() => { setEditingLog(l); logForm.setFieldsValue({ log_date: dayjs(l.log_date), duration: l.duration, summary: l.summary, content: l.content }) }}>编辑</Button>}
-              </div>
-            ))}
-          </div>
-          <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 12 }}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>{editingLog ? '编辑日志' : '上传新日志'}</div>
-            <Form form={logForm} layout="vertical">
-              <Form.Item name="log_date" label="日期" rules={[{ required: true }]}><DatePicker style={{ width: '100%' }} /></Form.Item>
-              <Form.Item name="duration" label="时长（分钟）" rules={[{ required: true }]}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
-              <Form.Item name="summary" label="备注"><Input.TextArea rows={2} /></Form.Item>
-              <Form.Item name="content" label="会议记录"><Input.TextArea rows={4} /></Form.Item>
-              <Button type="primary" onClick={submitLog} block>{editingLog ? '保存修改' : '新增日志'}</Button>
-            </Form>
-          </div>
-        </div>
-      </Modal>
     </div>
   )
 }

@@ -18,6 +18,7 @@ from app.models.order import CustomerProduct, Order
 from app.models.product import Product
 from app.models.tag import CustomerTag, Tag, TagCategory
 from app.models.user import User
+from app.services.accounting import ensure_accounting_type_schema, get_customer_admin_writeoff_total
 
 router = APIRouter(prefix="/consultant", tags=["consultant"])
 
@@ -235,6 +236,7 @@ async def _build_tags(customer_id: str, db: AsyncSession) -> list[TagOut]:
 
 
 async def _build_products(customer_id: str, db: AsyncSession) -> tuple[list[ProductOut], bool]:
+    await ensure_accounting_type_schema()
     rows = await db.execute(
         select(CustomerCourseEnrollment, Product)
         .join(Product, Product.id == CustomerCourseEnrollment.product_id)
@@ -315,6 +317,7 @@ async def consultant_customers(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("admin", "sales", "consultant")),
 ):
+    await ensure_accounting_type_schema()
     rows = await db.execute(
         select(ConsultantCustomer, Customer)
         .join(Customer, Customer.id == ConsultantCustomer.customer_id)
@@ -339,10 +342,7 @@ async def consultant_customers(
             select(func.count(ConsultationLog.id)).where(ConsultationLog.customer_id == c.id)
         )
         consultation_count = int(consultation_count_r.scalar() or 0)
-        total_spent_r = await db.execute(
-            select(func.coalesce(func.sum(Order.amount - Order.refund_total), 0)).where(Order.customer_id == c.id)
-        )
-        total_spent = Decimal(total_spent_r.scalar() or 0)
+        total_spent = await get_customer_admin_writeoff_total(db, c.id)
         gifted = Decimal(c.gifted_tuition_amount or 0)
         tuition_balance = max(Decimal('0'), gifted - total_spent)
 

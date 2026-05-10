@@ -33,8 +33,20 @@ from app.models.user import User
 from app.models.customer_course_enrollment import CustomerCourseEnrollment
 from app.models.tuition_gift_request import TuitionGiftRequest
 from app.models.audit_log import AuditLog
+from app.services.accounting import (
+    ADMIN_WRITEOFF_ACCOUNTING_TYPE,
+    ensure_accounting_type_schema,
+    get_customer_admin_writeoff_total,
+    get_customer_sales_spent,
+    get_sales_spent_in_period,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _ensure_admin_writeoff_enrollment(enrollment: CustomerCourseEnrollment) -> None:
+    if enrollment.accounting_type != ADMIN_WRITEOFF_ACCOUNTING_TYPE:
+        raise HTTPException(403, "仅允许管理员操作销课记录")
 
 
 class AdminPoolItemOut(BaseModel):
@@ -308,6 +320,7 @@ async def tuition_writeoff_summary(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_role("admin")),
 ):
+    await ensure_accounting_type_schema()
     customers_r = await db.execute(select(Customer))
     customers = customers_r.scalars().all()
 
@@ -326,30 +339,26 @@ async def tuition_writeoff_summary(
 
     for c in customers:
         gifted = Decimal(c.gifted_tuition_amount or 0)
-        spent_r = await db.execute(
-            select(func.coalesce(func.sum(Order.amount - Order.refund_total), 0)).where(Order.customer_id == c.id)
-        )
-        spent = Decimal(spent_r.scalar() or 0)
+        spent = await get_customer_sales_spent(db, c.id)
+        writeoff_total = await get_customer_admin_writeoff_total(db, c.id)
         pending_r = await db.execute(
             select(func.count(TuitionGiftRequest.id)).where(
                 TuitionGiftRequest.customer_id == c.id,
                 TuitionGiftRequest.status == "pending",
             )
         )
-        last_month_r = await db.execute(
-            select(func.coalesce(func.sum(Order.amount - Order.refund_total), 0)).where(
-                Order.customer_id == c.id,
-                Order.created_at >= last_month_start,
-                Order.created_at < this_month_start,
-                Order.refunded_at.is_(None),
-            )
+        last_month_spent_for_customer = await get_sales_spent_in_period(
+            db,
+            c.id,
+            last_month_start,
+            this_month_start,
         )
 
         total_gifted += gifted
         total_spent += spent
-        total_balance += max(Decimal("0"), gifted - spent)
+        total_balance += max(Decimal("0"), gifted - writeoff_total)
         total_pending += int(pending_r.scalar() or 0)
-        last_month_spent += Decimal(last_month_r.scalar() or 0)
+        last_month_spent += last_month_spent_for_customer
 
     return AdminTuitionWriteoffSummaryOut(
         total_gifted=float(total_gifted),
@@ -366,6 +375,7 @@ async def list_tuition_writeoff_customers(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_role("admin")),
 ):
+    await ensure_accounting_type_schema()
     customers_r = await db.execute(select(Customer).order_by(Customer.updated_at.desc(), Customer.created_at.desc()))
     customers = customers_r.scalars().all()
     out: list[AdminTuitionWriteoffCustomerOut] = []
@@ -393,12 +403,10 @@ async def list_tuition_writeoff_customers(
         if k and not any(k in text for text in searchable):
             continue
 
-        spent_r = await db.execute(
-            select(func.coalesce(func.sum(Order.amount - Order.refund_total), 0)).where(Order.customer_id == c.id)
-        )
-        total_spent = Decimal(spent_r.scalar() or 0)
+        total_spent = await get_customer_sales_spent(db, c.id)
         gifted = Decimal(c.gifted_tuition_amount or 0)
-        tuition_balance = max(Decimal("0"), gifted - total_spent)
+        writeoff_total = await get_customer_admin_writeoff_total(db, c.id)
+        tuition_balance = max(Decimal("0"), gifted - writeoff_total)
 
         pending_r = await db.execute(
             select(TuitionGiftRequest)
@@ -416,7 +424,10 @@ async def list_tuition_writeoff_customers(
             select(CustomerCourseEnrollment, Product, Order)
             .join(Product, Product.id == CustomerCourseEnrollment.product_id)
             .join(Order, Order.id == CustomerCourseEnrollment.order_id)
-            .where(CustomerCourseEnrollment.customer_id == c.id)
+            .where(
+                CustomerCourseEnrollment.customer_id == c.id,
+                CustomerCourseEnrollment.accounting_type == ADMIN_WRITEOFF_ACCOUNTING_TYPE,
+            )
             .order_by(CustomerCourseEnrollment.created_at.desc())
         )
         courses = [
@@ -548,6 +559,7 @@ async def create_admin_writeoff_course(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
+    await ensure_accounting_type_schema()
     if body.status not in ADMIN_COURSE_STATUSES:
         raise HTTPException(400, "status invalid")
     if body.amount < 0:
@@ -592,6 +604,7 @@ async def create_admin_writeoff_course(
         order_id=order.id,
         product_id=body.product_id,
         amount_paid=body.amount,
+        accounting_type=ADMIN_WRITEOFF_ACCOUNTING_TYPE,
         status=body.status,
         status_updated_by=current_user.id,
         status_updated_role="admin",
@@ -623,6 +636,7 @@ async def update_admin_course_status(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("admin")),
 ):
+    await ensure_accounting_type_schema()
     if body.status not in ADMIN_COURSE_STATUSES:
         raise HTTPException(400, "????????2???")
 
@@ -635,6 +649,7 @@ async def update_admin_course_status(
     enrollment = row.scalar_one_or_none()
     if enrollment is None:
         raise HTTPException(404, "???????")
+    _ensure_admin_writeoff_enrollment(enrollment)
 
     order_r = await db.execute(select(Order).where(Order.id == enrollment.order_id))
     order = order_r.scalar_one_or_none()
@@ -986,6 +1001,3 @@ async def admin_dashboard(
         product_deals=product_deals,
         consultant_delivery=consultant_delivery,
     )
-
-
-

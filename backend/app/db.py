@@ -13,3 +13,6 @@ async def init_db():
         import app.models  # noqa: F401
 
         await conn.run_sync(SQLModel.metadata.create_all)
+    from app.services.accounting import ensure_accounting_type_schema
+
+    await ensure_accounting_type_schema()

@@ -15,6 +15,7 @@ class CustomerCourseEnrollment(SQLModel, table=True):
     order_id: str = Field(foreign_key="orders.id", max_length=36, index=True)
     product_id: str = Field(foreign_key="products.id", max_length=36, index=True)
     amount_paid: Decimal = Field(default=Decimal("0.00"), sa_column=Column(Numeric(12, 2), nullable=False, server_default="0"))
+    accounting_type: str = Field(default="sales_spent", max_length=30, index=True)
     status: str = Field(default="purchased_not_started", max_length=50, index=True)
     status_updated_by: str | None = Field(default=None, foreign_key="users.id", max_length=36)
     status_updated_role: str | None = Field(default=None, max_length=20)

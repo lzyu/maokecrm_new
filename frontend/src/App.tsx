@@ -22,6 +22,7 @@ import ConsultantCustomersPage from './pages/consultant/ConsultantCustomersPage'
 import ConsultantDataReviewPage from './pages/consultant/ConsultantDataReviewPage'
 import ConsultantPoolPage from './pages/consultant/ConsultantPoolPage'
 import ConsultantCustomerLogsPage from './pages/consultant/ConsultantCustomerLogsPage'
+import ConsultantLogEditorPage from './pages/consultant/ConsultantLogEditorPage'
 
 export default function App() {
   return (
@@ -34,6 +35,7 @@ export default function App() {
             <Route element={<SalesLayout />}>
               <Route path="/sales/customers" element={<CustomerList />} />
               <Route path="/sales/customers/:customerId/logs" element={<SalesCustomerLogsPage />} />
+              <Route path="/sales/customers/:customerId/logs/:logId" element={<ConsultantLogEditorPage />} />
               <Route path="/sales/data-review" element={<DataReview />} />
             </Route>
           </Route>
@@ -42,6 +44,9 @@ export default function App() {
             <Route element={<ConsultantLayout />}>
               <Route path="/consultant/customers" element={<ConsultantCustomersPage />} />
               <Route path="/consultant/customers/:customerId/logs" element={<ConsultantCustomerLogsPage />} />
+              <Route path="/consultant/customers/:customerId/logs/new" element={<ConsultantLogEditorPage />} />
+              <Route path="/consultant/customers/:customerId/logs/:logId" element={<ConsultantLogEditorPage />} />
+              <Route path="/consultant/customers/:customerId/logs/:logId/edit" element={<ConsultantLogEditorPage />} />
               <Route path="/consultant/data-review" element={<ConsultantDataReviewPage />} />
               <Route path="/consultant/pool" element={<ConsultantPoolPage />} />
             </Route>

@@ -21,6 +21,12 @@ from app.models.customer_course_enrollment import CustomerCourseEnrollment
 from app.models.audit_log import AuditLog
 from app.models.tuition_gift_request import TuitionGiftRequest
 from app.models.tag import Tag, CustomerTag, TagCategory
+from app.services.accounting import (
+    SALES_SPENT_ACCOUNTING_TYPE,
+    ensure_accounting_type_schema,
+    get_customer_admin_writeoff_total,
+    get_customer_sales_spent,
+)
 
 router = APIRouter(prefix="/sales", tags=["sales"])
 
@@ -225,6 +231,7 @@ async def _ensure_customer_added_date_schema() -> None:
         await conn.execute(text("ALTER TABLE customers ALTER COLUMN phone DROP NOT NULL"))
         await conn.execute(text("UPDATE customers SET added_date = CURRENT_DATE WHERE added_date IS NULL"))
         await conn.execute(text("ALTER TABLE customers ALTER COLUMN added_date SET DEFAULT CURRENT_DATE"))
+    await ensure_accounting_type_schema()
 
 
 def _clean_optional_text(value: str | None) -> str | None:
@@ -394,12 +401,10 @@ async def _build_customer_out(customer: Customer, db: AsyncSession) -> CustomerO
         for e, p, o in enrollment_rows.all()
     ]
 
-    total_spent_r = await db.execute(
-        select(func.coalesce(func.sum(Order.amount - Order.refund_total), 0)).where(Order.customer_id == customer.id)
-    )
-    total_spent = Decimal(total_spent_r.scalar() or 0)
+    total_spent = await get_customer_sales_spent(db, customer.id)
     gifted = Decimal(customer.gifted_tuition_amount or 0)
-    tuition_balance = max(Decimal("0"), gifted - total_spent)
+    admin_writeoff_total = await get_customer_admin_writeoff_total(db, customer.id)
+    tuition_balance = max(Decimal("0"), gifted - admin_writeoff_total)
 
     # sales note / next follow-up stored on customers
     note = customer.sales_note
@@ -484,6 +489,7 @@ async def _get_enrollment_or_404(
     customer_id: str,
     enrollment_id: str,
 ) -> CustomerCourseEnrollment:
+    await ensure_accounting_type_schema()
     row = await db.execute(
         select(CustomerCourseEnrollment).where(
             CustomerCourseEnrollment.id == enrollment_id,
@@ -494,6 +500,11 @@ async def _get_enrollment_or_404(
     if enrollment is None:
         raise HTTPException(404, "课程记录不存在")
     return enrollment
+
+
+def _ensure_sales_accounting_enrollment(enrollment: CustomerCourseEnrollment) -> None:
+    if enrollment.accounting_type != SALES_SPENT_ACCOUNTING_TYPE:
+        raise HTTPException(403, "管理员销课记录仅允许管理员操作")
 
 
 @router.post("/tuition-gift-requests", status_code=201)
@@ -837,6 +848,7 @@ async def purchase_product(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("sales")),
 ):
+    await ensure_accounting_type_schema()
     customer = await _get_my_customer(customer_id, current_user, db)
 
     product_result = await db.execute(select(Product).where(Product.id == body.product_id))
@@ -880,6 +892,7 @@ async def purchase_product(
             order_id=order.id,
             product_id=body.product_id,
             amount_paid=body.amount,
+            accounting_type=SALES_SPENT_ACCOUNTING_TYPE,
             status="purchased_not_started",
             status_updated_by=current_user.id,
             status_updated_role="sales",
@@ -922,12 +935,24 @@ async def refund_order(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("sales")),
 ):
+    await ensure_accounting_type_schema()
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(404, "订单不存在")
 
     customer = await _get_my_customer(order.customer_id, current_user, db)
+    enroll_r = await db.execute(
+        select(CustomerCourseEnrollment)
+        .where(
+            CustomerCourseEnrollment.customer_id == order.customer_id,
+            CustomerCourseEnrollment.order_id == order.id,
+        )
+        .order_by(CustomerCourseEnrollment.created_at.desc())
+    )
+    enrollment = enroll_r.scalars().first()
+    if enrollment is not None:
+        _ensure_sales_accounting_enrollment(enrollment)
 
     if order.refunded_at:
         raise HTTPException(400, "已退款，不能重复操作")
@@ -948,15 +973,6 @@ async def refund_order(
     if cp:
         cp.is_refunded = True
 
-    enroll_r = await db.execute(
-        select(CustomerCourseEnrollment)
-        .where(
-            CustomerCourseEnrollment.customer_id == order.customer_id,
-            CustomerCourseEnrollment.order_id == order.id,
-        )
-        .order_by(CustomerCourseEnrollment.created_at.desc())
-    )
-    enrollment = enroll_r.scalars().first()
     if enrollment is not None:
         if enrollment.status == "sales_marked_completed":
             enrollment.status = "sales_marked_completed_refunded"
@@ -1007,6 +1023,7 @@ async def refund_sales_course(
 ):
     await _get_my_customer(customer_id, current_user, db)
     enrollment = await _get_enrollment_or_404(db, customer_id, enrollment_id)
+    _ensure_sales_accounting_enrollment(enrollment)
     order_r = await db.execute(select(Order).where(Order.id == enrollment.order_id))
     order = order_r.scalar_one_or_none()
     if order is None:
@@ -1053,6 +1070,7 @@ async def revert_sales_course_refund(
 ):
     await _get_my_customer(customer_id, current_user, db)
     enrollment = await _get_enrollment_or_404(db, customer_id, enrollment_id)
+    _ensure_sales_accounting_enrollment(enrollment)
     order_r = await db.execute(select(Order).where(Order.id == enrollment.order_id))
     order = order_r.scalar_one_or_none()
     if order is None:
@@ -1099,6 +1117,7 @@ async def update_sales_course_amount(
 ):
     await _get_my_customer(customer_id, current_user, db)
     enrollment = await _get_enrollment_or_404(db, customer_id, enrollment_id)
+    _ensure_sales_accounting_enrollment(enrollment)
     order_r = await db.execute(select(Order).where(Order.id == enrollment.order_id))
     order = order_r.scalar_one_or_none()
     if order is None:
@@ -1139,6 +1158,7 @@ async def update_sales_course_status(
 
     await _get_my_customer(customer_id, current_user, db)
     enrollment = await _get_enrollment_or_404(db, customer_id, enrollment_id)
+    _ensure_sales_accounting_enrollment(enrollment)
 
     enrollment.status = body.status
     enrollment.status_updated_by = current_user.id
@@ -1167,6 +1187,7 @@ async def create_sales_course(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("sales")),
 ):
+    await ensure_accounting_type_schema()
     await _get_my_customer(customer_id, current_user, db)
 
     product_r = await db.execute(select(Product).where(Product.id == body.product_id))
@@ -1204,6 +1225,7 @@ async def create_sales_course(
             order_id=order.id,
             product_id=body.product_id,
             amount_paid=amount,
+            accounting_type=SALES_SPENT_ACCOUNTING_TYPE,
             status="purchased_not_started",
             status_updated_by=current_user.id,
             status_updated_role="sales",
@@ -1437,9 +1459,3 @@ async def sales_dashboard(
         },
         "monthly_orders": monthly_orders,
     }
-
-
-
-
-
-

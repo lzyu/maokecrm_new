@@ -527,7 +527,7 @@ export default function CustomerList() {
               format="YYYY-MM-DD HH:00"
               style={{ width: 150 }}
               onChange={async (val) => {
-                await saveFollowUp(r.id, val ? dayjs(val).startOf('hour').toISOString() : null, r.note)
+                await saveFollowUp(r.id, val ? dayjs(val).startOf('hour').format('YYYY-MM-DDTHH:mm:ss') : null, r.note)
                 setEditingNextCustomerId(null)
               }}
               onOpenChange={(open) => {
@@ -939,7 +939,6 @@ export default function CustomerList() {
     </div>
   )
 }
-
 
 
 

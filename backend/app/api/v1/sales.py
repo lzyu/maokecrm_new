@@ -1,5 +1,5 @@
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from sqlalchemy import text
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -256,6 +256,16 @@ def _normalize_phone(value: str | None) -> str | None:
     elif compact.startswith("86") and len(compact) > 11:
         compact = compact[2:]
     return compact
+
+
+def _parse_iso_datetime(value: str) -> datetime:
+    raw = value.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(raw)
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
 
 
 async def _find_duplicate_customers(
@@ -756,7 +766,7 @@ async def update_customer(
     if body.note is not None:
         customer.sales_note = body.note
     if body.next_follow_up is not None:
-        customer.next_follow_up = datetime.fromisoformat(body.next_follow_up) if body.next_follow_up else None
+        customer.next_follow_up = _parse_iso_datetime(body.next_follow_up) if body.next_follow_up else None
     if body.consultation_count is not None:
         if body.consultation_count < 0 or body.consultation_count > 20:
             raise HTTPException(400, "consultation_count must be between 0 and 20")
@@ -1427,8 +1437,6 @@ async def sales_dashboard(
         },
         "monthly_orders": monthly_orders,
     }
-
-
 
 
 

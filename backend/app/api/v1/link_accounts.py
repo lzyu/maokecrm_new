@@ -80,5 +80,16 @@ async def delete_account(account_id: str, db: AsyncSession = Depends(get_db), _=
     account = result.scalar_one_or_none()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
+
+    customer_count_result = await db.execute(
+        select(func.count()).select_from(Customer).where(Customer.link_account_id == account_id)
+    )
+    customer_count = int(customer_count_result.scalar() or 0)
+    if customer_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"该工作账号下仍有 {customer_count} 个客户，无法删除，请先流转或处理客户",
+        )
+
     await db.delete(account)
     await db.commit()

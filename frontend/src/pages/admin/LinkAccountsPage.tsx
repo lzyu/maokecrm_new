@@ -84,6 +84,20 @@ export default function LinkAccountsPage() {
     }
   }
 
+  const handleDelete = async (account: LinkAccount) => {
+    if (account.customer_count > 0) {
+      message.warning(`该工作账号下仍有 ${account.customer_count} 个客户，请先流转或处理客户后再删除`)
+      return
+    }
+    try {
+      await api.delete(`/link-accounts/${account.id}`)
+      message.success('账号已删除')
+      fetchAccounts()
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '删除失败')
+    }
+  }
+
   const columns = [
     {
       title: '账号 ID',
@@ -126,7 +140,11 @@ export default function LinkAccountsPage() {
             onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.color = '#0E0E0E'}
             onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.color = '#8E8E8E'}
           ><SwapOutlined style={{ fontSize: 11 }} /> 流转</button>
-          <Popconfirm title="确认删除？" onConfirm={async () => { await api.delete(`/link-accounts/${r.id}`); fetchAccounts() }}>
+          <Popconfirm
+            title={r.customer_count > 0 ? `该账号下仍绑定 ${r.customer_count} 个客户` : '确认删除？'}
+            description={r.customer_count > 0 ? '请先流转或处理客户后再删除该工作账号' : '删除后将无法恢复'}
+            onConfirm={() => handleDelete(r)}
+          >
             <button className="action-link" style={{ color: '#B8B8B8' }}
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.color = '#DC2626'}
               onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.color = '#B8B8B8'}

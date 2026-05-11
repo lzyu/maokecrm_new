@@ -236,7 +236,6 @@ async def _build_tags(customer_id: str, db: AsyncSession) -> list[TagOut]:
 
 
 async def _build_products(customer_id: str, db: AsyncSession) -> tuple[list[ProductOut], bool]:
-    await ensure_accounting_type_schema()
     rows = await db.execute(
         select(CustomerCourseEnrollment, Product)
         .join(Product, Product.id == CustomerCourseEnrollment.product_id)
